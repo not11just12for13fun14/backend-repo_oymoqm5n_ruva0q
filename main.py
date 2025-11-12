@@ -1,9 +1,12 @@
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Any, Dict
+import os
+from database import db
 
-app = FastAPI()
+app = FastAPI(title="The 16th Element API")
 
+# CORS for local dev and preview
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,59 +16,39 @@ app.add_middleware(
 )
 
 @app.get("/")
-def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
+def read_root() -> Dict[str, Any]:
+    return {"message": "Backend running", "service": "16th-element"}
 
-@app.get("/api/hello")
-def hello():
-    return {"message": "Hello from the backend API!"}
 
 @app.get("/test")
-def test_database():
-    """Test endpoint to check if database is available and accessible"""
-    response = {
-        "backend": "✅ Running",
-        "database": "❌ Not Available",
-        "database_url": None,
-        "database_name": None,
-        "connection_status": "Not Connected",
+def test_db() -> Dict[str, Any]:
+    database_url = os.getenv("DATABASE_URL")
+    database_name = os.getenv("DATABASE_NAME")
+
+    status = {
+        "backend": "ok",
+        "database": "configured" if db is not None else "not_configured",
+        "database_url": f"{database_url[:6]}..." if database_url else None,
+        "database_name": database_name,
+        "connection_status": "connected" if db is not None else "disconnected",
         "collections": []
     }
-    
+
     try:
-        # Try to import database module
-        from database import db
-        
         if db is not None:
-            response["database"] = "✅ Available"
-            response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
-            response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
-            try:
-                collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
-                response["database"] = "✅ Connected & Working"
-            except Exception as e:
-                response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
-        else:
-            response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
+            status["collections"] = db.list_collection_names()
     except Exception as e:
-        response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
-    response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
-    response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
-    return response
+        status["connection_status"] = f"error: {e}"  # surface any connection issues
+
+    return status
 
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@app.get("/schema")
+def get_schema() -> Dict[str, Any]:
+    """Return schemas.py content so external tools can introspect collections."""
+    try:
+        with open("schemas.py", "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"status": "ok", "content": content}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
